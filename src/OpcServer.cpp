@@ -136,42 +136,49 @@ void OpcServer::opcRead(OpcClient& opcClient) {
 
   WiFiClient client = opcClient.tcpClient;
   uint8_t* buf = opcClient.buffer;
-  uint32_t msgLength = 0;
 
-  if(opcClient.bytesAvailable < opcClient.header.dataLength) {
-    readLen = client.read((uint8_t*)buf + opcClient.bufferLength, opcClient.bytesAvailable);
-    opcClient.bufferLength += readLen;
-    msgLength = OPC_HEADER_BYTES + opcClient.header.dataLength;
-    debug_sprint("Received TCP with ", opcClient.bytesAvailable,  "Bytes Appended to buffer now at ", opcClient.bufferLength, " data bytes\n");
-  } else {
-    // We have a header! Read Msg
-    debug_sprint("New Data Packet\n");
-    opcClient.header.channel = buf[0];
-    opcClient.header.command = buf[1];
-    opcClient.header.lenHigh = buf[2];
-    opcClient.header.lenLow = buf[3];
-    opcClient.header.dataLength = opcClient.header.lenLow | (unsigned(opcClient.header.lenHigh) << 8);
+  while (opcClient.bytesAvailable > 0){
+    
+    if(opcClient.header.dataLength == 0) {
+      readLen = client.read((uint8_t*)buf, OPC_HEADER_BYTES);
+      // We have a new Packet! Read Header
+      debug_sprint("New Data Packet\n");
+      opcClient.header.channel = buf[0];
+      opcClient.header.command = buf[1];
+      opcClient.header.lenHigh = buf[2];
+      opcClient.header.lenLow = buf[3];
+      opcClient.header.dataLength = opcClient.header.lenLow | (unsigned(opcClient.header.lenHigh) << 8);
+      
+      opcClient.bytesAvailable -= OPC_HEADER_BYTES;
+      opcClient.bufferLength += OPC_HEADER_BYTES;
+      debug_sprint("Received Data Packet of ", opcClient.header.dataLength, " Bytes with ", opcClient.bytesAvailable, " bytes available\n");
+    } 
 
-    msgLength = OPC_HEADER_BYTES + opcClient.header.dataLength;
+    if(opcClient.bytesAvailable <= opcClient.header.dataLength) {
+      // Our TCP Packet is a full OPC packet
+      readLen = client.read((uint8_t*)buf + opcClient.bufferLength, opcClient.bytesAvailable);
+      opcClient.bufferLength += readLen;
 
-    readLen = client.read((uint8_t*)buf + opcClient.bufferLength, opcClient.bytesAvailable);
-    opcClient.bufferLength += readLen;
-  }
+    } else {
+      // Our TCP Packet is a more than a full OPC packet
+      readLen = client.read((uint8_t*)buf + opcClient.bufferLength, ( opcClient.header.dataLength + OPC_HEADER_BYTES ) - opcClient.bufferLength);
+      opcClient.bufferLength += readLen;
+    }
 
-  if (opcClient.bufferLength < msgLength) {
-    // Waiting for more data
-    debug_sprint("Waiting for more data only Received ", opcClient.bufferLength, "\n");
-  } else {
-    // Full OPC Message Read
-    debug_sprint("Received Complete Data Packet\n");
-    opcMsgReceivedCallback_(opcClient.header.channel, opcClient.header.command, opcClient.header.dataLength, buf + OPC_HEADER_BYTES);
+    opcClient.bytesAvailable -= readLen;
 
-    // Set to start buffer over on next call
-    opcClient.bufferLength = 0;
-    opcClient.header.channel = 0;
-    opcClient.header.command = 0;
-    opcClient.header.lenHigh = 0;
-    opcClient.header.lenLow = 0;
-    opcClient.header.dataLength = 0;
+    if (opcClient.bufferLength == opcClient.header.dataLength + OPC_HEADER_BYTES) {
+
+      debug_sprint("Received Complete Data Packet\n");
+      opcMsgReceivedCallback_(opcClient.header.channel, opcClient.header.command, opcClient.header.dataLength, buf + OPC_HEADER_BYTES);
+
+      // Set to start buffer over on next call
+      opcClient.bufferLength = 0;
+      opcClient.header.channel = 0;
+      opcClient.header.command = 0;
+      opcClient.header.lenHigh = 0;
+      opcClient.header.lenLow = 0;
+      opcClient.header.dataLength = 0;
+    }
   }
 }
