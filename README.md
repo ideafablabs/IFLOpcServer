@@ -13,16 +13,12 @@ If you've run this successfully on other boards let us know!
 
 # Installation
 
-## Arduino IDE
-1. In the Arduino IDE, Choose **Sketch** > **Include Library** > **Manage Libraries**
-2. Search for **OpcServer**
-3. Click **Install**
-
-## [PlatformIO](http://platformio.org/lib/show/350/OpcServer)
-1. platformio lib install 350
+`git clone https://github.com/ideafablabs/IFLOpcServer.git` 
 
 # Usage
+
 See [examples](https://github.com/ideafablabs/IFLOpcServer/tree/master/examples).
+
 ### Includes
 ```c++
 #include "OpcServer.h"
@@ -30,7 +26,7 @@ See [examples](https://github.com/ideafablabs/IFLOpcServer/tree/master/examples)
 Depending on your platform you may need to add other headers. For example _ESP8266WiFi.h_ for ESP8266.
 
 ### Initialize
-Initialize `OpcServer` with `WiFiServer` (or `TCPServer` for Particle), `OpcClient` sized for the number of clients you'd like to support, and a `buffer` large enough for the OPC messages you'd like to receive.
+Initialize `OpcServer` with `WiFiServer`, `OpcClient` sized for the number of clients you'd like to support, and a `buffer` large enough for the OPC messages you'd like to receive.
 
 ```c++
 WiFiServer server = WiFiServer(OPC_PORT);
