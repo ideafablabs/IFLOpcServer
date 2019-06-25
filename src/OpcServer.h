@@ -5,9 +5,10 @@
 #include "Config.h"
 #include "Opc.h"
 
+template <class T>
 class OpcServer {
  public:
-  OpcServer(WiFiServer& server,
+  OpcServer<T>(T& server,
             uint8_t opcChannel,
             OpcClient opcClients[],
             uint8_t clientSize,
@@ -16,6 +17,12 @@ class OpcServer {
             OpcMsgReceivedCallback opcMsgReceivedCallback = [](uint8_t channel, uint8_t command, uint16_t length, uint8_t* data) -> void {},
             OpcClientConnectedCallback opcClientConnectedCallback = [](WiFiClient&) -> void {},
             OpcClientDisconnectedCallback opcClientDisconnectedCallback = [](OpcClient&) -> void {});
+
+  OpcServer<T>::OpcServer(T& server,
+                     uint8_t opcChannel,
+                     uint8_t buffer[],
+                     uint32_t bufferSize,
+                     OpcMsgReceivedCallback opcMsgReceivedCallback = [](uint8_t channel, uint8_t command, uint16_t length, uint8_t* data) -> void {});         
 
   bool begin();
   void process();
@@ -36,7 +43,7 @@ class OpcServer {
 
   OpcClient* opcClients_;
 
-  WiFiServer& server_;
+  T& server_;
 
   OpcMsgReceivedCallback opcMsgReceivedCallback_;
   OpcClientConnectedCallback opcClientConnectedCallback_;
@@ -48,3 +55,8 @@ class OpcServer {
   uint8_t clientSize_;
   uint8_t clientCount_;
 };
+
+struct UDPLISTENER {
+  WiFiUDP listener;
+  uint16_t port;
+}

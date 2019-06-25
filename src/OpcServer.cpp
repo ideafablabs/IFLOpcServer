@@ -1,7 +1,7 @@
 #include "OpcServer.h"
 #include "Definitions.h"
 
-OpcServer::OpcServer(WiFiServer& server,
+OpcServer<WiFiServer>::OpcServer(WiFiServer& server,
                      uint8_t opcChannel,
                      OpcClient opcClients[],
                      uint8_t clientSize,
@@ -25,23 +25,40 @@ OpcServer::OpcServer(WiFiServer& server,
   }
 }
 
-uint8_t OpcServer::getClientCount() const {
+OpcServer<UDPLISTENER>::OpcServer(UDPLISTENER& server,
+                     uint8_t opcChannel,
+                     uint8_t buffer[],
+                     uint32_t bufferSize,
+                     OpcMsgReceivedCallback OpcMsgReceivedCallback)
+    : server_(server),
+      opcMsgReceivedCallback_(OpcMsgReceivedCallback),
+      bufferSize_(bufferSize),
+      opcChannel_(opcChannel),
+      clientSize_(0),
+      clientCount_(0) {}
+
+template <class T>
+uint8_t OpcServer<T>::getClientCount() const {
   return clientCount_;
 }
 
-uint8_t OpcServer::getClientSize() const {
+template <class T>
+uint8_t OpcServer<T>::getClientSize() const {
   return clientSize_;
 }
 
-uint32_t OpcServer::getBufferSize() const {
+template <class T>
+uint32_t OpcServer<T>::getBufferSize() const {
   return bufferSize_;
 }
 
-uint16_t OpcServer::getBufferSizeInPixels() const {
+template <class T>
+uint16_t OpcServer<T>::getBufferSizeInPixels() const {
   return ((bufferSize_ - OPC_HEADER_BYTES) / 3);
 }
 
-uint32_t OpcServer::getBytesAvailable() const {
+template <class T>
+uint32_t OpcServer<T>::getBytesAvailable() const {
   uint32_t b = 0;
   for (size_t i = 0; i < clientSize_; i++) {
     b += opcClients_[i].bytesAvailable;
@@ -49,19 +66,22 @@ uint32_t OpcServer::getBytesAvailable() const {
   return b;
 }
 
-void OpcServer::setMsgReceivedCallback(OpcMsgReceivedCallback opcMsgReceivedCallback) {
+template <class T>
+void OpcServer<T>::setMsgReceivedCallback(OpcMsgReceivedCallback opcMsgReceivedCallback) {
   opcMsgReceivedCallback_ = opcMsgReceivedCallback;
 }
 
-void OpcServer::setClientConnectedCallback(OpcClientConnectedCallback opcClientConnectedCallback) {
+template <class T>
+void OpcServer<T>::setClientConnectedCallback(OpcClientConnectedCallback opcClientConnectedCallback) {
   opcClientConnectedCallback_ = opcClientConnectedCallback;
 }
 
-void OpcServer::setClientDisconnectedCallback(OpcClientDisconnectedCallback opcClientDisconnectedCallback) {
+template <class T>
+void OpcServer<T>::setClientDisconnectedCallback(OpcClientDisconnectedCallback opcClientDisconnectedCallback) {
   opcClientDisconnectedCallback_ = opcClientDisconnectedCallback;
 }
 
-bool OpcServer::begin() {
+bool OpcServer<WiFiServer>::begin() {
 #if SERVER_BEGIN_BOOL
   if (!server_.begin()) {
     return false;
@@ -73,7 +93,19 @@ bool OpcServer::begin() {
   return true;
 }
 
-void OpcServer::process() {
+bool OpcServer<UDPLISTENER>::begin() {
+#if SERVER_BEGIN_BOOL
+  if (!server_.listner.begin(server_.port)) {
+    return false;
+  }
+#else
+  server_.listener.begin(server_.port);
+#endif
+
+  return true;
+}
+
+void OpcServer<WiFiServer>::process() {
   // process existing clients
   clientCount_ = 0;
   for (size_t i = 0; i < clientSize_; i++) {
@@ -116,7 +148,30 @@ void OpcServer::process() {
   }
 }
 
-bool OpcServer::processClient(OpcClient& opcClient) {
+void OpcServer<UDPLISTENER>::process() {
+  int packetSize = server_.listener.parsePacket();
+  if (packetSize == bufferSize_) {
+    uint8_t buffer[bufferSize_];
+    // receive incoming UDP packets
+    debug_sprint("Received ", packetSize, " bytes from ", server_.listener.remoteIP().toString().c_str(), " port ", server_.listener.remotePort(), "\n");
+    int len = server_.listener.read(buffer, bufferSize_);
+    if (len == bufferSize_) {
+      uint8_t channel = buffer[0];
+      uint8_t command = buffer[1];
+      uint8_t lenHigh = buffer[2];
+      uint8_t lenLow = buffer[3];
+      uint32_t dataLength = lenLow | (unsigned(lenHigh) << 8);
+
+      opcMsgReceivedCallback_(channel, command, dataLength, buffer + OPC_HEADER_BYTES);
+    } else {
+      debug_sprint("Only Read in ", len, " of a ", packetSize, " byte UDP Packet\n");
+    }
+  } else {
+    debug_sprint("Only Received ", packetSize, "in the UDP Packet\n");
+  }
+}
+
+bool OpcServer<WiFiServer>::processClient(OpcClient& opcClient) {
   if (opcClient.tcpClient.connected()) {
     opcClient.state = OpcClient::CLIENT_STATE_CONNECTED;
 
@@ -131,7 +186,7 @@ bool OpcServer::processClient(OpcClient& opcClient) {
   return false;
 }
 
-void OpcServer::opcRead(OpcClient& opcClient) {
+void OpcServer<WiFiServer>::opcRead(OpcClient& opcClient) {
   size_t readLen;
 
   WiFiClient client = opcClient.tcpClient;
