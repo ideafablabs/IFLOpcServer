@@ -1,7 +1,8 @@
 #include "OpcServer.h"
 #include "Definitions.h"
 
-OpcServer::OpcServer(WiFiServer& server,
+template<>
+OpcServer<WiFiServer>::OpcServer(WiFiServer& server,
                      uint8_t opcChannel,
                      OpcClient opcClients[],
                      uint8_t clientSize,
@@ -25,43 +26,21 @@ OpcServer::OpcServer(WiFiServer& server,
   }
 }
 
-uint8_t OpcServer::getClientCount() const {
-  return clientCount_;
-}
+template<>
+OpcServer<UDPLISTENER>::OpcServer(UDPLISTENER& server,
+                     uint8_t opcChannel,
+                     uint8_t buffer[],
+                     uint32_t bufferSize,
+                     OpcMsgReceivedCallback OpcMsgReceivedCallback)
+    : server_(server),
+      opcMsgReceivedCallback_(OpcMsgReceivedCallback),
+      bufferSize_(bufferSize),
+      opcChannel_(opcChannel),
+      clientSize_(0),
+      clientCount_(0) {}
 
-uint8_t OpcServer::getClientSize() const {
-  return clientSize_;
-}
-
-uint32_t OpcServer::getBufferSize() const {
-  return bufferSize_;
-}
-
-uint16_t OpcServer::getBufferSizeInPixels() const {
-  return ((bufferSize_ - OPC_HEADER_BYTES) / 3);
-}
-
-uint32_t OpcServer::getBytesAvailable() const {
-  uint32_t b = 0;
-  for (size_t i = 0; i < clientSize_; i++) {
-    b += opcClients_[i].bytesAvailable;
-  }
-  return b;
-}
-
-void OpcServer::setMsgReceivedCallback(OpcMsgReceivedCallback opcMsgReceivedCallback) {
-  opcMsgReceivedCallback_ = opcMsgReceivedCallback;
-}
-
-void OpcServer::setClientConnectedCallback(OpcClientConnectedCallback opcClientConnectedCallback) {
-  opcClientConnectedCallback_ = opcClientConnectedCallback;
-}
-
-void OpcServer::setClientDisconnectedCallback(OpcClientDisconnectedCallback opcClientDisconnectedCallback) {
-  opcClientDisconnectedCallback_ = opcClientDisconnectedCallback;
-}
-
-bool OpcServer::begin() {
+template<>
+bool OpcServer<WiFiServer>::begin() {
 #if SERVER_BEGIN_BOOL
   if (!server_.begin()) {
     return false;
@@ -73,65 +52,21 @@ bool OpcServer::begin() {
   return true;
 }
 
-void OpcServer::process() {
-  // process existing clients
-  clientCount_ = 0;
-  for (size_t i = 0; i < clientSize_; i++) {
-    if (processClient(opcClients_[i])) {
-      clientCount_++;
-    } else if (opcClients_[i].state == OpcClient::CLIENT_STATE_CONNECTED) {
-      opcClients_[i].state = OpcClient::CLIENT_STATE_DISCONNECTED;
-      opcClients_[i].tcpClient.stop();
-      opcClients_[i].bytesAvailable = 0;
-      opcClientDisconnectedCallback_(opcClients_[i]);
-    }
+template<>
+bool OpcServer<UDPLISTENER>::begin() {
+#if SERVER_BEGIN_BOOL
+  if (!server_.listner.begin(server_.port)) {
+    return false;
   }
-
-  // Any new clients?
-  WiFiClient tcpClient = server_.available();
-  if (tcpClient) {
-    opcClientConnectedCallback_(tcpClient);
-
-    // Check if we have room for a new client
-    if (clientCount_ >= clientSize_) {
-      info_sprint("Too many clients, Connection Refused\n");
-      tcpClient.stop();
-    } else {
-      for (size_t i = 0; i < clientSize_; i++) {
-        if (!opcClients_[i].tcpClient.connected()) {
-          if (opcClients_[i].state != OpcClient::CLIENT_STATE_DISCONNECTED) {
-            opcClientDisconnectedCallback_(opcClients_[i]);
-          }
-          opcClients_[i].tcpClient.stop();
-          opcClients_[i].bytesAvailable = 0;
-          opcClients_[i].tcpClient = tcpClient;
-#if HAS_REMOTE_IP
-          opcClients_[i].ipAddress = tcpClient.remoteIP();
+#else
+  server_.listener.begin(server_.port);
 #endif
-          opcClients_[i].state = OpcClient::CLIENT_STATE_CONNECTED;
-          break;
-        }
-      }
-    }
-  }
+
+  return true;
 }
 
-bool OpcServer::processClient(OpcClient& opcClient) {
-  if (opcClient.tcpClient.connected()) {
-    opcClient.state = OpcClient::CLIENT_STATE_CONNECTED;
-
-    if ((opcClient.bytesAvailable = opcClient.tcpClient.available()) > 0) {
-      opcRead(opcClient);
-      perf_sprint("*");
-    } else {
-      perf_sprint(".");
-    }
-    return true;
-  }
-  return false;
-}
-
-void OpcServer::opcRead(OpcClient& opcClient) {
+template<>
+void OpcServer<WiFiServer>::opcRead(OpcClient& opcClient) {
   size_t readLen;
 
   WiFiClient client = opcClient.tcpClient;
@@ -180,5 +115,89 @@ void OpcServer::opcRead(OpcClient& opcClient) {
       opcClient.header.lenLow = 0;
       opcClient.header.dataLength = 0;
     }
+  }
+}
+
+template<>
+bool OpcServer<WiFiServer>::processClient(OpcClient& opcClient) {
+  if (opcClient.tcpClient.connected()) {
+    opcClient.state = OpcClient::CLIENT_STATE_CONNECTED;
+
+    if ((opcClient.bytesAvailable = opcClient.tcpClient.available()) > 0) {
+      opcRead(opcClient);
+      perf_sprint("*");
+    } else {
+      perf_sprint(".");
+    }
+    return true;
+  }
+  return false;
+}
+
+template<>
+void OpcServer<WiFiServer>::process() {
+  // process existing clients
+  clientCount_ = 0;
+  for (size_t i = 0; i < clientSize_; i++) {
+    if (processClient(opcClients_[i])) {
+      clientCount_++;
+    } else if (opcClients_[i].state == OpcClient::CLIENT_STATE_CONNECTED) {
+      opcClients_[i].state = OpcClient::CLIENT_STATE_DISCONNECTED;
+      opcClients_[i].tcpClient.stop();
+      opcClients_[i].bytesAvailable = 0;
+      opcClientDisconnectedCallback_(opcClients_[i]);
+    }
+  }
+
+  // Any new clients?
+  WiFiClient tcpClient = server_.available();
+  if (tcpClient) {
+    opcClientConnectedCallback_(tcpClient);
+
+    // Check if we have room for a new client
+    if (clientCount_ >= clientSize_) {
+      info_sprint("Too many clients, Connection Refused\n");
+      tcpClient.stop();
+    } else {
+      for (size_t i = 0; i < clientSize_; i++) {
+        if (!opcClients_[i].tcpClient.connected()) {
+          if (opcClients_[i].state != OpcClient::CLIENT_STATE_DISCONNECTED) {
+            opcClientDisconnectedCallback_(opcClients_[i]);
+          }
+          opcClients_[i].tcpClient.stop();
+          opcClients_[i].bytesAvailable = 0;
+          opcClients_[i].tcpClient = tcpClient;
+#if HAS_REMOTE_IP
+          opcClients_[i].ipAddress = tcpClient.remoteIP();
+#endif
+          opcClients_[i].state = OpcClient::CLIENT_STATE_CONNECTED;
+          break;
+        }
+      }
+    }
+  }
+}
+
+template<>
+void OpcServer<UDPLISTENER>::process() {
+  int packetSize = server_.listener.parsePacket();
+  if (packetSize == bufferSize_) {
+    uint8_t buffer[bufferSize_];
+    // receive incoming UDP packets
+    debug_sprint("Received ", packetSize, " bytes from ", server_.listener.remoteIP().toString().c_str(), " port ", server_.listener.remotePort(), "\n");
+    int len = server_.listener.read(buffer, bufferSize_);
+    if (len == bufferSize_) {
+      uint8_t channel = buffer[0];
+      uint8_t command = buffer[1];
+      uint8_t lenHigh = buffer[2];
+      uint8_t lenLow = buffer[3];
+      uint32_t dataLength = lenLow | (unsigned(lenHigh) << 8);
+
+      opcMsgReceivedCallback_(channel, command, dataLength, buffer + OPC_HEADER_BYTES);
+    } else {
+      debug_sprint("Only Read in ", len, " of a ", packetSize, " byte UDP Packet\n");
+    }
+  } else {
+    debug_sprint("Only Received ", packetSize, "in the UDP Packet\n");
   }
 }

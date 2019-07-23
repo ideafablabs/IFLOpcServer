@@ -5,7 +5,7 @@
   "repository":
   {
     "type": "git",
-    "url": "https://github.com/plasticrake/OpcServer.git"
+    "url": "https://github.com/ideafablabs/IFLOpcServer"
   },
   "frameworks": "arduino",
   "platforms": "*"

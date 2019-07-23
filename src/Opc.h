@@ -24,7 +24,7 @@ struct OpcHeader {
   uint8_t command;
   uint8_t lenHigh;
   uint8_t lenLow;
-  uint16_t dataLength;
+  uint32_t dataLength;
 };
 
 struct OpcClient {
